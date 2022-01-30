@@ -1,0 +1,188 @@
+//Une cellule rectangulaire,[x1,x2]x[y1,y2] dans le rectangle [0,x3]x[0,y3]
+
+//La dimension d'une cellule est: longueur = 1.58x10^-2 cm; diametre = 2.6334x10^-3 cm, 
+//fente =1.5x10^-6cm, selon J.P Keener dans [Ephaptic coupling in Cardiac Myocytes].
+
+// Donnees de J>P Keener
+//real x0= 1.58e-2/2.0, x1= 1.1e-2, y0= 2.63e-3/2.0,y1=3e-3;
+
+// Save vtk files
+
+
+ 
+
+
+load "iovtk";
+
+//valeurs these de P.E.Becue
+//real x1 = 10.0e-6, x2 = 100.0e-6+x1, x3 =  x2+x1, y1 =10.0e-6, y2 =20.0e-6+y1, y3 =y2+y1;
+real x1 = 10.0, x2 = 100.0+x1, x3 =  x2+x1, y1 =10.0, y2 =20.0+y1, y3 =y2+y1;
+
+
+int inside=1;
+int outside1= 2;
+int outside2 =3;
+int outside3= 4;
+int outside4 =5;
+
+
+ // The extra_rectangle [0,x3]x[0,y3]
+border a(t=0,1){ x=t*x3; y= 0.0;label=outside1;};
+border b(t=0,1){ x=x3; y= t*y3;label=outside2;};
+border c(t=0,1){ x=(1-t)*x3; y=y3;label=outside3;};
+border d(t=0,1){ x=0; y=(1-t)*y3;label=outside4;};
+
+//The cell [x1,x2]x[y1,y2]
+
+border a1(t=0,1){ x=(1-t)*x1+t*x2; y= y1;label=inside;};
+border b1(t=0,1){ x=x2; y=(1-t)*y1 + t*y2;label=inside ;};
+border c1(t=0,1){ x=(1-t)*x2+x1*t; y=y2;label=inside ;};
+border d1(t=0,1){ x=x1; y=(1-t)*y2+y1*t;label= inside;};
+
+
+int n=10;
+mesh Th = buildmesh(a(10*n)+b(2*n)+c(10*n)+d(2*n)+a1(-9*n)+b1(-2*n)+c1(-9*n)+d1(-2*n));
+//mesh TH =buildmesh(C0(30*m)+C1(30*m))
+mesh TH =buildmesh(a1(9*n)+b1(2*n)+c1(9*n)+d1(2*n));
+
+fespace Vh(Th,P1);
+fespace VH(TH,P1); 
+
+
+Vh h1=hTriangle;// Taille de  mailles pour chaque triangle
+VH h2=hTriangle;
+
+
+Vh u1=0.0,u3,v3,v1,w=1.0,w1,u1old=0.0,u3old=0.0,wold;  
+VH u2=0.0,v2,u2old=0.0;
+
+real err1L2,err2L2,Error1, Error2;
+
+
+//conductivite Sigma1 et Sigma2
+real sigmaE=20.0, sigmaI=3.0, t=0.0, Cm =1.0, c0=0.1, epsilon=0.01, epsilon1 = 1.0e-1,epsilon3 = 1.0e-8 ;
+
+//MS gating constants given in millisecond(ms)
+real tauin=0.3, tauout=6, tauopen=130, tauclose=150, vg=0.13;
+real mu=0.7, sig = 0.2;
+
+real T= 10.0; real dt=0.001; 
+
+// characteristics parameters
+real T1 =1.0, L= 1.0e-4,sigma1 = T1/Cm*sigmaE/L, sigma2 = T1/Cm*sigmaI/L, vm=125;
+
+real g2 =1.0, g4 =1.0;
+// Where to save files
+string fn = "./microproblem_";
+
+
+
+
+// solution quelconque
+func u1exact = 1.0; 
+func u2exact = 0.0;  
+func f1= 0;
+func f2= 0;
+func g1= 0;//below_bndary
+func g3= 0;
+
+func real G2(real t){
+  real  t0 = 1.0, R=0.5;
+    if (abs(t-t0) < R)
+       return -20.0e4*exp(-1.0/(R^2-abs(t-t0)^2))*exp(1.0/R^2);
+    else
+       return 0.0;
+ }
+   
+func real G4(real t){
+  real  t0 =1.0 , R=0.5;
+    if (abs(t-t0) < R) 
+       return 20.0e4*exp(-1.0/(R^2-abs(t-t0)^2))*exp(1.0/R^2);
+    else
+       return 0.0;
+ }
+
+problem membranepotential(u3,v3)= int2d(Th)(u3*v3) 
+           - int2d(Th)((dt/tauin*w*u3old^2*(1-u3old)-dt/tauout*u3old+u3old)*v3);
+
+problem gatingfunction(w,w1) = int2d(Th)(w*w1)
+           - int2d(Th)((dt/tauopen*(u3<vg)*(1-wold)-dt/tauclose*(u3>=vg)*wold+wold)*w1);
+
+int timestepNber = 0;
+
+savevtk(fn+"u"+timestepNber+".vtk", Th,u1, u3old);
+savevtk(fn+"U"+timestepNber+".vtk", TH, u2);
+
+for(t=0;t<T;t+=dt)
+ { 
+  timestepNber++;
+  u3old=u2-u1;
+  wold =w;
+ g2 = G2(t);
+ g4 = G4(t);
+  membranepotential;
+  gatingfunction;
+  //timestepNber = t/dt;// timestep number
+
+  //plot(u3, wait=0, value=1, fill=1);
+
+  int N=T/dt;
+  cout<<"**** NberTime-step " <<timestepNber<<"/"<<N<< " -- t = " <<t<<" ****"<<endl;
+ 
+
+  int i=0;
+
+  Error1=1.0;
+  Error2=1.0;
+  int iError=1;
+
+ 
+  //domain decomposition
+  while(i<1  && iError )
+  {
+    i++;
+   
+    
+     //formulation variationnelle sur le domaine extra-cellulaire
+     solve Pb1(u1,v1,init=i,solver=UMFPACK)=int2d(Th)(sigma1*(dx(u1)*dx(v1)+dy(u1)*dy(v1)))
+          +int1d(Th,inside)(1.0/dt*u1*v1)+int1d(Th,inside)(1.0/dt*(u3-u2old)*v1)
+          -int1d(Th,outside1)(T1/vm*1.0/Cm*g1*v1)-int1d(Th,outside2)(T1/vm*1.0/Cm*g2*v1)
+          -int1d(Th,outside3)((T1/vm)*(1.0/Cm)*g3*v1)-int1d(Th,outside4)((T1/vm)*(1.0/Cm)*g4*v1)-int2d(Th)(f1*v1);
+        
+     //formulation variationnelle sur le domaine intra-cellulaire
+     solve Pb2(u2,v2,init=i,solver=UMFPACK)=int2d(TH)(sigma2*(dx(u2)*dx(v2)+dy(u2)*dy(v2)))
+           +int1d(TH,inside)((1.0/dt)*u2*v2)-int1d(TH,inside)((1.0/dt)*(u1+u3)*v2)-int2d(TH)(f2*v2);
+
+     real u1average=int2d(Th)(u1-u1old)/int2d(Th)(1.0);
+     real uaverage =int2d(Th)(u1)/int2d(Th)(1.0);
+     Error1= sqrt( int2d(Th)((u1-u1old-u1average)^2) );
+     Error2= sqrt( int2d(TH)((u2-u2old-u1average)^2) );
+     if (Error1 <1.0e-5 && Error2 <1.0e-5 )  iError=0;
+      u1 = u1-uaverage;
+      u2 = u2-uaverage;
+      u1old=u1;
+      u2old=u2;
+
+      cout << "error " << i << "  " << t << "  "  << Error1 << "  " << Error2  << endl;
+    }
+
+    plot(u1,u2, wait=0, value=1, fill=1);
+
+ // Save to vtk file
+ // real tt=1000*t;
+  if (timestepNber >10001 && timestepNber < 10501&& timestepNber%1000 == 0)
+     {
+     savevtk(fn+"u"+(timestepNber)+".vtk", Th, u1,u3,w);
+     savevtk(fn+"U"+(timestepNber)+".vtk", TH, u2);
+     }
+   if (timestepNber> 10501 && timestepNber%5000 == 0  )
+     {
+     savevtk(fn+"u"+(timestepNber)+".vtk", Th,u1,u3,w);
+     savevtk(fn+"U"+(timestepNber)+".vtk", TH, u2);
+     }
+//int np = cout.precision(3);
+  cout << " Potential  " << t << "  " << u1(x1-epsilon,y3/2.0) << "  " <<  u2(x1+epsilon,y3/2.0) << "  " << u1(x3/2.0,y1-epsilon) << "  " << u2(x3/2.0,y1+epsilon)<< "  "
+  <<u1(x2+epsilon, y3/2.0) << "  " << u2(x2-epsilon,y3/2.0) << endl;
+// if (abs(t-10.501)<1e-6){ dt= 10*dt;}
+     
+}
